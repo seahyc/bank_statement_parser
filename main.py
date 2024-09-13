@@ -2,7 +2,7 @@ import camelot
 import pandas as pd
 from pandas import DataFrame, Series
 from typing import List, Dict, Tuple, Optional
-import re
+import re, os, string
 
 def extract_tables(file_path: str) -> List[pd.DataFrame]:
     tables = camelot.read_pdf(file_path, pages='all', flavor='stream')
@@ -11,10 +11,17 @@ def extract_tables(file_path: str) -> List[pd.DataFrame]:
 # Hoisting the regex patterns so they're shared across functions
 DATE_PATTERN = re.compile(r'\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?|\d{1,2} \w{3}')
 DESCRIPTION_PATTERN = re.compile(r'^(?!\d{1,2}[/-]\d{1,2}|[A-Za-z]{3} \d{1,2})(?!\(?\d{1,3}(,\d{3})*(\.\d{2})?\)?\s*(CR|DR)?)[A-Za-z0-9* .#:()/-]+$')
-CURRENCY_PATTERN = re.compile(r'\(?\d{1,3}(,\d{3})*(\.\d{2})?\)?\s*(CR|DR)?')
+CURRENCY_PATTERN = re.compile(r'\(?\$?\s*\d{1,}(,\d{2,3})*(\.\d{2})\)?\s*(CR|DR)?')
 
+def clean_text_basic(text: str) -> str:
+    """
+    Cleans the input text by removing non-printable characters and trimming whitespace.
+    """
+    # Remove non-printable characters
+    cleaned = ''.join(c for c in text if c in string.printable).strip()
+    return cleaned
 
-def detect_merged_rows(col_str: str):
+def detect_merged_rows(col_str: str) -> bool:
     """
     Detects if there are multiple parts (e.g., date, description, currency) in the column string
     or if there are merged rows that need to be split.
@@ -24,12 +31,15 @@ def detect_merged_rows(col_str: str):
     # Check for specific cases of merged rows
     if len(parts) == 2:
         # Strip whitespace from both parts
-        part1, part2 = [p.strip() for p in parts]
+        part1, part2 = [clean_text_basic(p) for p in parts]
         
-        # Check for specific text cases
-        if (part1 == "Transaction" and part2 == "Value") or \
-           (part1 == "Deposit" and part2 == "Balance") or \
-           (part1 == "Date" and part2 == "Date"):
+        # Debugging: Print the parts being checked
+        print(f"DEBUG: Checking merged parts: '{part1}' and '{part2}'")
+        
+        # Check for specific text cases (make comparisons case-insensitive)
+        if (part1.lower() == "transaction" and part2.lower() == "value") or \
+           (part1.lower() == "deposit" and part2.lower() == "balance") or \
+           (part1.lower() == "date" and part2.lower() == "date"):
             return True
 
         # Check for various patterns
@@ -38,6 +48,7 @@ def detect_merged_rows(col_str: str):
             (CURRENCY_PATTERN, CURRENCY_PATTERN),
             (DATE_PATTERN, DESCRIPTION_PATTERN),
             (DESCRIPTION_PATTERN, CURRENCY_PATTERN),
+            (DESCRIPTION_PATTERN, DESCRIPTION_PATTERN),  # Ensure this line is present
         ]
         for pattern1, pattern2 in pattern_combos:
             if pattern1.search(part1) and pattern2.search(part2):
@@ -50,53 +61,61 @@ def detect_merged_rows(col_str: str):
 
     return False
 
-
-def split_and_rebuild_row(row: Series, col_str: str, split_col_idx: int, prev_split_info: Optional[Dict[int, Tuple[int, int]]] = None) -> Tuple[Series, Dict[int, Tuple[int, int]]]:
+def split_and_rebuild_row(row: Series, col_str: str, split_col_idx: int, split_columns_info: Dict[int, List[str]]) -> Series:
     """
-    Split the column string by the separator (newline \n) and redistribute the parts into the row.
-    Ensure other columns remain untouched by shifting them right.
-    Returns the new row and the updated split information.
+    Splits the column string by newline and redistributes the parts into the row.
+    Assigns the first part to the left subcolumn and the second part to the right subcolumn.
+    If there's only one part, assigns it to the right subcolumn and sets the left to NaN.
     """
     parts = col_str.split("\n")
-    new_row = row.copy()
-    current_split_info = prev_split_info.copy() if prev_split_info else {}
-
-    if prev_split_info:
-        max_columns = max(end for _, (_, end) in prev_split_info.items()) + 1
-        new_row = pd.Series([pd.NA] * max_columns, index=range(max_columns))
-
-        for old_idx, value in enumerate(row):
-            if old_idx in prev_split_info:
-                new_start, new_end = prev_split_info[old_idx]
-                if len(parts) == 1:
-                    new_row[new_start] = value
-                elif len(parts) == (new_end - new_start + 1):
-                    for i, part in enumerate(parts):
-                        new_row[new_start + i] = part
-                elif str(value).endswith('\n'):
-                    new_row[new_start] = value.rstrip('\n')
-                elif str(value).startswith('\n'):
-                    offset = str(value).count('\n', 0, str(value).index(str(value).strip()))
-                    new_row[new_start + offset] = value.lstrip('\n')
-                else:
-                    new_row[new_end] = value
-            else:
-                new_idx = sum(1 for start, end in prev_split_info.values() if start <= old_idx) + old_idx
-                new_row[new_idx] = value
-    else:
-        # Shift columns after split_col_idx to the right by len(parts) - 1 to make space for the new parts
-        num_parts = len(parts)
+    num_new_parts = len(parts)
+    subcolumns = split_columns_info.get(split_col_idx, [])
+    
+    # Debugging: Print the split operation details
+    print(f"DEBUG: Splitting column index {split_col_idx} into {num_new_parts} parts: {parts}")
+    
+    # Shift columns to the right to make space for new parts (if necessary)
+    if num_new_parts > 1:
+        # Start shifting from the end to avoid overwriting
         for idx in reversed(range(split_col_idx + 1, len(row))):
-            new_row[idx + num_parts - 1] = new_row[idx]
+            row[idx + num_new_parts - 1] = row[idx]
+            row[idx] = pd.NA
+        print(f"DEBUG: Row after shifting for column {split_col_idx}: {row.tolist()}")
+    
+    # Assign split parts based on the number of parts
+    if num_new_parts == 2:
+        # Assign first part to the left subcolumn
+        row[split_col_idx] = parts[0].strip()
+        print(f"DEBUG: Inserted '{parts[0].strip()}' into column {split_col_idx} ({subcolumns[0]})")
+        
+        # Assign second part to the right subcolumn
+        row[split_col_idx + 1] = parts[1].strip()
+        print(f"DEBUG: Inserted '{parts[1].strip()}' into column {split_col_idx + 1} ({subcolumns[1]})")
+    elif num_new_parts == 1:
+        # Assign the single part to the right subcolumn
+        row[split_col_idx] = pd.NA
+        row[split_col_idx + 1] = parts[0].strip()
+        print(f"DEBUG: Assigned '{parts[0].strip()}' to column {split_col_idx + 1} ({subcolumns[1]}), set column {split_col_idx} ({subcolumns[0]}) to NaN")
+    else:
+        # Handle unexpected number of parts by assigning NaN
+        row[split_col_idx] = pd.NA
+        row[split_col_idx + 1] = pd.NA
+        print(f"DEBUG: Unexpected number of parts in column {split_col_idx}, assigned NaN to both subcolumns")
+    
+    return row
 
-        # Insert the parts into consecutive columns starting from split_col_idx
-        for idx, part in enumerate(parts):
-            new_row[split_col_idx + idx] = part
-
-        current_split_info[split_col_idx] = (split_col_idx, split_col_idx + num_parts - 1)
-
-    return new_row, current_split_info
-
+def is_header_row(row: Series) -> bool:
+    """
+    Determines if a given row is the header row based on the presence of specific keywords.
+    """
+    # Define header keywords
+    header_keywords = ['date', 'description', 'cheque', 'withdrawal', 'deposit', 'balance']
+    
+    # Convert all cells in the row to lowercase strings for case-insensitive comparison
+    row_lower = row.astype(str).str.lower()
+    
+    # Check if all header keywords are present in the row
+    return all(any(keyword in cell for cell in row_lower) for keyword in header_keywords)
 
 def is_transaction_row(row: Series) -> bool:
     # Simple transaction detection: Date → Description → Currency
@@ -118,39 +137,70 @@ def is_transaction_row(row: Series) -> bool:
 
     return found_date and found_description and found_currency
 
-def detect_and_process_transaction_table(table: DataFrame) -> Tuple[DataFrame, bool]:
-    """
-    Processes a table for transactions and returns a new DataFrame along with a boolean indicating if it's a transaction table.
-    """
+def clean_and_detect_transaction_table(table: DataFrame) -> Tuple[DataFrame, bool]:
     modified_table: List[Series] = []
-    current_split_info = None
-    
-    # Process each row in the table
+    split_columns_info: Dict[int, List[str]] = {}  # Maps original column index to subcolumn names
+    split_counts: Dict[int, int] = {}  # Keeps track of the number of new columns added at each split
+
+    # Helper function to get current column index based on splits
+    def get_current_col_idx(col_idx):
+        return col_idx + sum(split_counts.get(idx, 0) for idx in split_counts if idx < col_idx)
+
+    # First, process the header row to determine splits and shifts
+    header_processed = False
     for idx, row in table.iterrows():
         new_row = row.copy()
-        columns_to_split = []
 
-        for col_idx, col_value in enumerate(row):
-            col_str = str(col_value)
-            if detect_merged_rows(col_str):
-                columns_to_split.append(col_idx)
-        
-        # Process columns in reverse order to avoid shifting indices
-        for col_idx in sorted(columns_to_split, reverse=True):
-            new_row, current_split_info = split_and_rebuild_row(new_row, str(new_row[col_idx]), col_idx, current_split_info)
-        
-        modified_table.append(new_row)
+        if not header_processed and is_header_row(row):
+            header_processed = True
+            # Detect and split merged columns in the header
+            columns_to_split = [col_idx for col_idx, col_value in enumerate(row) if detect_merged_rows(str(col_value))]
+            
+            # Sort columns to split in descending order to handle shifts correctly
+            for orig_col_idx in sorted(columns_to_split, reverse=True):
+                current_col_idx = get_current_col_idx(orig_col_idx)
+                col_str = str(new_row[current_col_idx])
+                parts = col_str.split("\n")
+                subcolumns = [part.strip() for part in parts]
+                
+                # Record the split columns and their subcolumns
+                split_columns_info[orig_col_idx] = subcolumns
+                
+                # Perform the split
+                new_row = split_and_rebuild_row(new_row, col_str, current_col_idx, split_columns_info)
+                
+                # Update split_counts
+                split_counts[orig_col_idx] = len(parts) - 1
+
+            modified_table.append(new_row)
+        else:
+            # Adjusted split_counts for data rows
+            def get_current_col_idx_data(col_idx):
+                return col_idx + sum(split_counts.get(idx, 0) for idx in split_counts if idx < col_idx)
+            
+            # Only split columns identified from the header
+            for orig_col_idx in sorted(split_columns_info.keys(), reverse=True):
+                current_col_idx = get_current_col_idx_data(orig_col_idx)
+                if current_col_idx >= len(new_row):
+                    continue  # Skip if the column index is out of bounds
+                col_str = str(new_row[current_col_idx])
+                if detect_merged_rows(col_str):
+                    # Perform the split
+                    new_row = split_and_rebuild_row(new_row, col_str, current_col_idx, split_columns_info)
+            modified_table.append(new_row)
     
-    # Create a new DataFrame with the modified rows
+    # Determine the maximum number of columns after splitting
     max_columns = max(len(row) for row in modified_table)
     processed_table = pd.DataFrame(modified_table, columns=range(max_columns))
-    
+
     # Check if any row is a transaction row
-    is_transaction = any(is_transaction_row(row) for _, row in processed_table.iterrows())
+    is_transaction = any(is_transaction_row(row) for row in processed_table.itertuples(index=False))
     
     if is_transaction:
+        print("Original Table:")
         print(table)
-        print(f"\033[92m{processed_table}\033[0m")
+        print("\nProcessed Table:")
+        print(f"\033[92m{processed_table}\033[0m")  # Green text for visibility
     
     return processed_table, is_transaction
 
@@ -231,18 +281,18 @@ def main():
     file_paths = [
         '360 ACCOUNT-2001-08-24.pdf',
         'dbs_acct_06_2024.pdf',
-        'dbs_cc_05_2024.pdf',
+        'dbs_cc_07_2024.pdf',
         'OCBC 90.N CARD-9905-08-24.pdf'
     ]
     
     for file_path in file_paths:
         print(f"Processing file: {file_path}")
-        file_path = os.path.join('/Users/yingcong/Documents/Bank Statements', file_path)
-        tables = extract_tables(file_path)
+        file_path_full = os.path.join('/Users/yingcong/Documents/Bank Statements', file_path)
+        tables = extract_tables(file_path_full)
         
         transaction_tables: List[pd.DataFrame] = []
         for table in tables:
-            processed_table, is_transaction = detect_and_process_transaction_table(table)
+            processed_table, is_transaction = clean_and_detect_transaction_table(table)
             if is_transaction:
                 transaction_tables.append(processed_table)
         
@@ -256,3 +306,6 @@ def main():
             continue
         for transaction in transactions:
             print(transaction)
+
+if __name__ == "__main__":
+    main()
