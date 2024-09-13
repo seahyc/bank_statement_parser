@@ -2,7 +2,7 @@ import camelot
 import pandas as pd
 from pandas import DataFrame, Series
 from typing import List, Dict, Tuple, Optional
-import re
+import re, os
 
 def extract_tables(file_path: str) -> List[pd.DataFrame]:
     tables = camelot.read_pdf(file_path, pages='all', flavor='stream')
@@ -228,25 +228,34 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
 
 
 def main():
-    file_path = '/Users/yingcong/Documents/Bank Statements/360 ACCOUNT-2001-05-24.pdf'
-    tables = extract_tables(file_path)
+    file_paths = [
+        '360 ACCOUNT-2001-08-24.pdf',
+        'dbs_acct_06_2024',
+        'dbs_cc_05_2024',
+        'OCBC 90.N CARD-9905-08-24'
+    ]
     
-    transaction_tables: List[pd.DataFrame] = []
-    for table in tables:
-        processed_table, is_transaction = detect_and_process_transaction_table(table)
-        if is_transaction:
-            transaction_tables.append(processed_table)
-    
-    if any(is_bank_account_table(table) for table in transaction_tables):
-        transactions = extract_bank_account_transactions(transaction_tables)
-    else:
-        transactions = extract_credit_card_transactions(transaction_tables)
-    
-    if not transactions:
-        print("No transactions found")
-        return
-    for transaction in transactions:
-        print(transaction)
+    for file_path in file_paths:
+        print(f"Processing file: {file_path}")
+        file_path = os.path.join('/Users/yingcong/Documents/Bank Statements', file_path)
+        tables = extract_tables(file_path)
+        
+        transaction_tables: List[pd.DataFrame] = []
+        for table in tables:
+            processed_table, is_transaction = detect_and_process_transaction_table(table)
+            if is_transaction:
+                transaction_tables.append(processed_table)
+        
+        if any(is_bank_account_table(table) for table in transaction_tables):
+            transactions = extract_bank_account_transactions(transaction_tables)
+        else:
+            transactions = extract_credit_card_transactions(transaction_tables)
+        
+        if not transactions:
+            print("No transactions found")
+            return
+        for transaction in transactions:
+            print(transaction)
 
 if __name__ == "__main__":
     main()
