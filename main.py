@@ -2,7 +2,7 @@ import camelot
 import pandas as pd
 from pandas import DataFrame, Series
 from typing import List, Dict, Tuple, Optional
-import re, os
+import re
 
 def extract_tables(file_path: str) -> List[pd.DataFrame]:
     tables = camelot.read_pdf(file_path, pages='all', flavor='stream')
@@ -230,9 +230,9 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
 def main():
     file_paths = [
         '360 ACCOUNT-2001-08-24.pdf',
-        'dbs_acct_06_2024',
-        'dbs_cc_05_2024',
-        'OCBC 90.N CARD-9905-08-24'
+        'dbs_acct_06_2024.pdf',
+        'dbs_cc_05_2024.pdf',
+        'OCBC 90.N CARD-9905-08-24.pdf'
     ]
     
     for file_path in file_paths:
@@ -253,9 +253,6 @@ def main():
         
         if not transactions:
             print("No transactions found")
-            return
+            continue
         for transaction in transactions:
             print(transaction)
-
-if __name__ == "__main__":
-    main()
