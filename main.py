@@ -1,6 +1,7 @@
 import camelot
 import pandas as pd
 from pandas import DataFrame, Series
+import pycountry
 from typing import List, Dict, Tuple, Optional
 import re, os, string
 
@@ -188,89 +189,104 @@ def is_bank_account_table(table: pd.DataFrame) -> bool:
     header_row = table.iloc[:10].astype(str).apply(lambda x: x.str.lower())
     return all(any(keyword in cell for cell in header_row.values.flatten()) for keyword in header_keywords)
 
+def extract_bank_account_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
+    return []
+
 def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
     transactions = []
-    non_transaction_markers = ['SUB-TOTAL', 'TOTAL', 'NEW TRANSACTIONS']
-    
+    non_transaction_markers = {'SUB-TOTAL', 'TOTAL', 'NEW TRANSACTIONS'}
+
+    # Dynamic location detection using pycountry
+    country_codes = {country.alpha_2 for country in pycountry.countries}
+    country_codes.update({country.alpha_3 for country in pycountry.countries})
+    country_names = {country.name.upper() for country in pycountry.countries}
+    location_keywords = country_codes.union(country_names)
+
     def clean_text(text):
         return ' '.join(str(text).strip().split())
-    
-    def combine_amount(row):
-        amount_pattern = re.compile(r'\(\d{1,3}(,\d{3})*(\.\d{2})?\)?')
-        for i in range(len(row) - 1):
-            if isinstance(row[i], str):
-                match = amount_pattern.match(row[i])
-                if match and not row[i].endswith(')'):
-                    if row[i + 1] == ')':
-                        row[i] = f"{row[i]})"
-                        row[i + 1] = ''
-        return row
-    
-    non_empty_columns = set()
+
+    def parse_amount(amount_str):
+        amount_str = amount_str.replace(',', '')
+        amount_str = amount_str.replace(' ', '')
+        is_negative = False
+
+        # Handle starting or ending parentheses
+        if amount_str.startswith('('):
+            is_negative = True
+            amount_str = amount_str[1:]
+        if amount_str.endswith(')'):
+            is_negative = True
+            amount_str = amount_str[:-1]
+
+        # Handle 'CR' or 'DR' notation
+        if amount_str.endswith('CR'):
+            is_negative = True
+            amount_str = amount_str[:-2]
+        elif amount_str.endswith('DR'):
+            amount_str = amount_str[:-2]
+
+        try:
+            amount = float(amount_str)
+            if is_negative:
+                amount = -amount
+            return amount
+        except ValueError:
+            return None
+
+    def is_location(value_str):
+        return value_str.upper() in location_keywords
+
     for table in tables:
         current_transaction = {}
-        non_empty_columns = set()
-        
         for idx, row in table.iterrows():
             if is_transaction_row(row):
-                # New transaction starts
                 if current_transaction:
                     transactions.append(current_transaction)
                 current_transaction = {}
-                
-                row = combine_amount(row)
-                # Map columns to 'Date', 'Description', 'Amount (SGD)' using regex
-                date_found = False
-                amount_found = False
+
                 description_parts = []
-                for _, value in enumerate(row):
+                date_found = amount_found = False
+
+                for value in row:
                     value_str = clean_text(value)
                     if not date_found and DATE_PATTERN.match(value_str):
                         current_transaction['Date'] = value_str
                         date_found = True
                     elif not amount_found and CURRENCY_PATTERN.search(value_str):
-                        current_transaction['Amount (SGD)'] = value_str
+                        current_transaction['Amount (SGD)'] = parse_amount(value_str)
                         amount_found = True
-                    else:
-                        if value_str != '':
-                            description_parts.append(value_str)
+                    elif not is_location(value_str) and value_str != '':
+                        description_parts.append(value_str)
+
                 current_transaction['Description'] = ' '.join(description_parts)
-                
-                for col, value in enumerate(row):
-                    if pd.notna(value) and value != '':
-                        current_transaction[col] = clean_text(value)
-                        non_empty_columns.add(col)
-                
+
                 # Check next row for additional description
-                if idx != table.index[-1]:
+                if table.index.get_loc(idx) + 1 < len(table):
                     next_row = table.iloc[table.index.get_loc(idx) + 1]
-                    if not is_transaction_row(next_row) and not any(marker in str(val).upper() for marker in non_transaction_markers for val in next_row):
-                        additional_text = ' '.join(clean_text(val) for val in next_row if pd.notna(val) and val != '')
+                    if not is_transaction_row(next_row) and not any(
+                        marker in clean_text(val).upper() for val in next_row for marker in non_transaction_markers
+                    ):
+                        additional_text = ' '.join(
+                            clean_text(val) for val in next_row
+                            if pd.notna(val) and val != '' and not is_location(clean_text(val))
+                        )
                         if additional_text:
-                            description_col = 1
-                            if description_col in current_transaction:
-                                current_transaction[description_col] = clean_text(f"{current_transaction[description_col]} {additional_text}")
-                            else:
-                                current_transaction[description_col] = additional_text
-        
+                            current_transaction['Description'] += ' ' + additional_text
+            else:
+                continue  # Skip non-transaction rows
+
         if current_transaction:
             transactions.append(current_transaction)
-    
-    # Remove empty columns
-    cleaned_transactions = []
-    for transaction in transactions:
-        cleaned_transaction = {col: val for col, val in transaction.items() if col in non_empty_columns}
-        cleaned_transactions.append(cleaned_transaction)
-    
-    return cleaned_transactions
+
+    return transactions
 
 
 def main():
     file_paths = [
-        # '360 ACCOUNT-2001-07-24.pdf',
-        # 'dbs_acct_07_2024.pdf',
-        'dbs_cc_05_2024.pdf',
-        'OCBC 90.N CARD-9905-08-24.pdf'
+        '360 ACCOUNT-2001-07-24.pdf',
+        'dbs_acct_07_2024.pdf',
+        # 'dbs_cc_05_2024.pdf',
+        # 'OCBC 90.N CARD-9905-08-24.pdf'
     ]
     
     for file_path in file_paths:
