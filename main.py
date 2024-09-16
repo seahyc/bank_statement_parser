@@ -219,6 +219,22 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
                 current_transaction = {}
                 
                 row = combine_amount(row)
+                # Map columns to 'Date', 'Description', 'Amount (SGD)' using regex
+                date_found = False
+                amount_found = False
+                description_parts = []
+                for _, value in enumerate(row):
+                    value_str = clean_text(value)
+                    if not date_found and DATE_PATTERN.match(value_str):
+                        current_transaction['Date'] = value_str
+                        date_found = True
+                    elif not amount_found and CURRENCY_PATTERN.search(value_str):
+                        current_transaction['Amount (SGD)'] = value_str
+                        amount_found = True
+                    else:
+                        if value_str != '':
+                            description_parts.append(value_str)
+                current_transaction['Description'] = ' '.join(description_parts)
                 
                 for col, value in enumerate(row):
                     if pd.notna(value) and value != '':
