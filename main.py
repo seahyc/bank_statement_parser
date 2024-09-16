@@ -68,22 +68,21 @@ def split_and_rebuild_row(row: Series, col_str: str, split_col_idx: int, split_c
     If there's only one part, assigns it to the right subcolumn and sets the left to NaN.
     """
     parts = col_str.split("\n")
-    num_new_parts = len(parts)
     subcolumns = split_columns_info.get(split_col_idx, [])
     
     # Debugging: Print the split operation details
-    print(f"DEBUG: Splitting column index {split_col_idx} into {num_new_parts} parts: {parts}")
+    print(f"DEBUG: Splitting {col_str} of column index {split_col_idx} into {len(parts)} parts: {parts}")
     
     # Shift columns to the right to make space for new parts (if necessary)
-    if num_new_parts > 1:
+    if len(subcolumns) > 1:
         # Start shifting from the end to avoid overwriting
         for idx in reversed(range(split_col_idx + 1, len(row))):
-            row[idx + num_new_parts - 1] = row[idx]
-            row[idx] = pd.NA
+            row[idx + len(subcolumns) - 1] = row[idx]
+            row[idx] = ''
         print(f"DEBUG: Row after shifting for column {split_col_idx}: {row.tolist()}")
     
     # Assign split parts based on the number of parts
-    if num_new_parts == 2:
+    if len(parts) == 2:
         # Assign first part to the left subcolumn
         row[split_col_idx] = parts[0].strip()
         print(f"DEBUG: Inserted '{parts[0].strip()}' into column {split_col_idx} ({subcolumns[0]})")
@@ -91,15 +90,15 @@ def split_and_rebuild_row(row: Series, col_str: str, split_col_idx: int, split_c
         # Assign second part to the right subcolumn
         row[split_col_idx + 1] = parts[1].strip()
         print(f"DEBUG: Inserted '{parts[1].strip()}' into column {split_col_idx + 1} ({subcolumns[1]})")
-    elif num_new_parts == 1:
+    elif len(parts) == 1:
         # Assign the single part to the right subcolumn
-        row[split_col_idx] = pd.NA
+        row[split_col_idx] = ''
         row[split_col_idx + 1] = parts[0].strip()
         print(f"DEBUG: Assigned '{parts[0].strip()}' to column {split_col_idx + 1} ({subcolumns[1]}), set column {split_col_idx} ({subcolumns[0]}) to NaN")
     else:
         # Handle unexpected number of parts by assigning NaN
-        row[split_col_idx] = pd.NA
-        row[split_col_idx + 1] = pd.NA
+        row[split_col_idx] = ''
+        row[split_col_idx + 1] = ''
         print(f"DEBUG: Unexpected number of parts in column {split_col_idx}, assigned NaN to both subcolumns")
     
     return row
@@ -109,13 +108,16 @@ def is_header_row(row: Series) -> bool:
     Determines if a given row is the header row based on the presence of specific keywords.
     """
     # Define header keywords
-    header_keywords = ['date', 'description', 'cheque', 'withdrawal', 'deposit', 'balance']
-    
+    bank_account_header_keywords = ['date', 'description', 'withdrawal', 'deposit', 'balance']
+    credit_card_header_keywords = ['date', 'description', 'amount']
     # Convert all cells in the row to lowercase strings for case-insensitive comparison
     row_lower = row.astype(str).str.lower()
     
     # Check if all header keywords are present in the row
-    return all(any(keyword in cell for cell in row_lower) for keyword in header_keywords)
+    return (
+        all(any(keyword in cell for cell in row_lower) for keyword in bank_account_header_keywords) or
+        all(any(keyword in cell for cell in row_lower) for keyword in credit_card_header_keywords)
+    )
 
 def is_transaction_row(row: Series) -> bool:
     # Simple transaction detection: Date → Description → Currency
@@ -145,10 +147,9 @@ def clean_and_detect_transaction_table(table: DataFrame) -> Tuple[DataFrame, boo
     # Helper function to get current column index based on splits
     def get_current_col_idx(col_idx):
         return col_idx + sum(split_counts.get(idx, 0) for idx in split_counts if idx < col_idx)
-
     # First, process the header row to determine splits and shifts
     header_processed = False
-    for idx, row in table.iterrows():
+    for _, row in table.iterrows():
         new_row = row.copy()
 
         if not header_processed and is_header_row(row):
@@ -174,19 +175,10 @@ def clean_and_detect_transaction_table(table: DataFrame) -> Tuple[DataFrame, boo
 
             modified_table.append(new_row)
         else:
-            # Adjusted split_counts for data rows
-            def get_current_col_idx_data(col_idx):
-                return col_idx + sum(split_counts.get(idx, 0) for idx in split_counts if idx < col_idx)
-            
             # Only split columns identified from the header
             for orig_col_idx in sorted(split_columns_info.keys(), reverse=True):
-                current_col_idx = get_current_col_idx_data(orig_col_idx)
-                if current_col_idx >= len(new_row):
-                    continue  # Skip if the column index is out of bounds
-                col_str = str(new_row[current_col_idx])
-                if detect_merged_rows(col_str):
-                    # Perform the split
-                    new_row = split_and_rebuild_row(new_row, col_str, current_col_idx, split_columns_info)
+                col_str=str(row[orig_col_idx])
+                new_row = split_and_rebuild_row(new_row, col_str, orig_col_idx, split_columns_info)
             modified_table.append(new_row)
     
     # Determine the maximum number of columns after splitting
@@ -279,9 +271,9 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
 
 def main():
     file_paths = [
-        '360 ACCOUNT-2001-08-24.pdf',
-        'dbs_acct_06_2024.pdf',
-        'dbs_cc_07_2024.pdf',
+        # '360 ACCOUNT-2001-07-24.pdf',
+        # 'dbs_acct_07_2024.pdf',
+        # 'dbs_cc_05_2024.pdf',
         'OCBC 90.N CARD-9905-08-24.pdf'
     ]
     
