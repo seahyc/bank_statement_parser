@@ -33,9 +33,6 @@ def detect_merged_rows(col_str: str) -> bool:
         # Strip whitespace from both parts
         part1, part2 = [clean_text_basic(p) for p in parts]
         
-        # Debugging: Print the parts being checked
-        print(f"DEBUG: Checking merged parts: '{part1}' and '{part2}'")
-        
         # Check for specific text cases (make comparisons case-insensitive)
         if (part1.lower() == "transaction" and part2.lower() == "value") or \
            (part1.lower() == "deposit" and part2.lower() == "balance") or \
@@ -70,37 +67,28 @@ def split_and_rebuild_row(row: Series, col_str: str, split_col_idx: int, split_c
     parts = col_str.split("\n")
     subcolumns = split_columns_info.get(split_col_idx, [])
     
-    # Debugging: Print the split operation details
-    print(f"DEBUG: Splitting {col_str} of column index {split_col_idx} into {len(parts)} parts: {parts}")
-    
     # Shift columns to the right to make space for new parts (if necessary)
     if len(subcolumns) > 1:
         # Start shifting from the end to avoid overwriting
         for idx in reversed(range(split_col_idx + 1, len(row))):
             row[idx + len(subcolumns) - 1] = row[idx]
             row[idx] = ''
-        print(f"DEBUG: Row after shifting for column {split_col_idx}: {row.tolist()}")
     
     # Assign split parts based on the number of parts
     if len(parts) == 2:
         # Assign first part to the left subcolumn
         row[split_col_idx] = parts[0].strip()
-        print(f"DEBUG: Inserted '{parts[0].strip()}' into column {split_col_idx} ({subcolumns[0]})")
         
         # Assign second part to the right subcolumn
         row[split_col_idx + 1] = parts[1].strip()
-        print(f"DEBUG: Inserted '{parts[1].strip()}' into column {split_col_idx + 1} ({subcolumns[1]})")
     elif len(parts) == 1:
         # Assign the single part to the right subcolumn
         row[split_col_idx] = ''
         row[split_col_idx + 1] = parts[0].strip()
-        print(f"DEBUG: Assigned '{parts[0].strip()}' to column {split_col_idx + 1} ({subcolumns[1]}), set column {split_col_idx} ({subcolumns[0]}) to NaN")
     else:
         # Handle unexpected number of parts by assigning NaN
         row[split_col_idx] = ''
         row[split_col_idx + 1] = ''
-        print(f"DEBUG: Unexpected number of parts in column {split_col_idx}, assigned NaN to both subcolumns")
-    
     return row
 
 def is_header_row(row: Series) -> bool:
@@ -189,8 +177,6 @@ def clean_and_detect_transaction_table(table: DataFrame) -> Tuple[DataFrame, boo
     is_transaction = any(is_transaction_row(row) for row in processed_table.itertuples(index=False))
     
     if is_transaction:
-        print("Original Table:")
-        print(table)
         print("\nProcessed Table:")
         print(f"\033[92m{processed_table}\033[0m")  # Green text for visibility
     
@@ -201,12 +187,6 @@ def is_bank_account_table(table: pd.DataFrame) -> bool:
     header_keywords = ['withdrawal', 'deposit', 'balance']
     header_row = table.iloc[:10].astype(str).apply(lambda x: x.str.lower())
     return all(any(keyword in cell for cell in header_row.values.flatten()) for keyword in header_keywords)
-
-def extract_bank_account_transactions(transaction_tables: List[pd.DataFrame]) -> List[Dict]:
-    all_transactions = []
-    
-    for table in transaction_tables:
-        transactions = []
 
 def extract_credit_card_transactions(tables: List[pd.DataFrame]) -> List[Dict]:
     transactions = []
@@ -273,12 +253,14 @@ def main():
     file_paths = [
         # '360 ACCOUNT-2001-07-24.pdf',
         # 'dbs_acct_07_2024.pdf',
-        # 'dbs_cc_05_2024.pdf',
+        'dbs_cc_05_2024.pdf',
         'OCBC 90.N CARD-9905-08-24.pdf'
     ]
     
     for file_path in file_paths:
+        print("\033[95m" + "=" * 80)  # Bright purple
         print(f"Processing file: {file_path}")
+        print("=" * 80 + "\033[0m")  # Reset color
         file_path_full = os.path.join('/Users/yingcong/Documents/Bank Statements', file_path)
         tables = extract_tables(file_path_full)
         
