@@ -1,0 +1,8 @@
+{
+  "typeCheckingMode": "basic",
+  "stubPath": "./stubs",
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__"
+  ]
+}
