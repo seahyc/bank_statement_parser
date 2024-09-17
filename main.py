@@ -463,7 +463,7 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
 
 def extract_statement_date(table: pd.DataFrame, pdf_text: str) -> Tuple[Optional[str], Optional[str]]:
     # Patterns to match
-    if DEBUG_OUTPUT or True:
+    if DEBUG_OUTPUT:
         print(f"DEBUG_OUTPUT: extract_statement_date input: table=\n{format_dataframe_for_debug(table)}, pdf_text=\n{pdf_text!r}")
     date_patterns = [
         r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})',  # e.g., "23 May 2024"
@@ -481,7 +481,7 @@ def extract_statement_date(table: pd.DataFrame, pdf_text: str) -> Tuple[Optional
                         try:
                             date = datetime.strptime(date_str, "%d %b %Y")
                             if 2010 <= date.year <= min(2050, datetime.now().year + 1):  # Guardrail for reasonable years
-                                if DEBUG_OUTPUT or True:
+                                if DEBUG_OUTPUT:
                                     print(f"DEBUG_OUTPUT: extract_statement_date output: ({date_str}, {str(date.year)})")
                                 return date_str, str(date.year)
                         except ValueError:
@@ -494,13 +494,13 @@ def extract_statement_date(table: pd.DataFrame, pdf_text: str) -> Tuple[Optional
         date_str = match.group(1)
         try:
             date = datetime.strptime(date_str, "%d-%m-%Y")
-            if DEBUG_OUTPUT or True:
+            if DEBUG_OUTPUT:
                 print(f"DEBUG_OUTPUT: extract_statement_date output: ({date.strftime('%d %b %Y')}, {str(date.year)})")
             return date.strftime("%d %b %Y"), str(date.year)
         except ValueError:
             pass
 
-    if DEBUG_OUTPUT or True:
+    if DEBUG_OUTPUT:
         print("DEBUG_OUTPUT: extract_statement_date output: (None, None)")
     return None, None
 
@@ -553,13 +553,10 @@ def main():
             transactions = extract_credit_card_transactions(transaction_tables, statement_year)
         
         if not transactions:
-            if DEBUG_OUTPUT:
-                print("No transactions found")
+            print("No transactions found")
             continue
-        for transaction in transactions:
-            if DEBUG_OUTPUT:
-                print(transaction)
-            continue
+        for transaction in transactions:            
+            print(transaction)
 
 if __name__ == "__main__":
     main()
