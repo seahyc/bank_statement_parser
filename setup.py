@@ -5,7 +5,7 @@ def get_version():
     version = os.environ.get('GITHUB_REF_NAME')
     if version and version.startswith('v'):
         return version[1:]  # Remove 'v' prefix
-    return '0.1.0'  # Default version if not a release
+    return '0.1.1'  # Default version if not a release
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
