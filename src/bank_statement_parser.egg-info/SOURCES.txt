@@ -1,0 +1,10 @@
+LICENSE
+README.md
+setup.py
+src/bank_statement_parser.egg-info/PKG-INFO
+src/bank_statement_parser.egg-info/SOURCES.txt
+src/bank_statement_parser.egg-info/dependency_links.txt
+src/bank_statement_parser.egg-info/entry_points.txt
+src/bank_statement_parser.egg-info/requires.txt
+src/bank_statement_parser.egg-info/top_level.txt
+tests/test_main.py

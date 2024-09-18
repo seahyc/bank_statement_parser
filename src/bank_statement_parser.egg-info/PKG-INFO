@@ -1,0 +1,24 @@
+Metadata-Version: 2.1
+Name: bank_statement_parser
+Version: 0.1.0
+Summary: A tool to parse bank statements from PDF files
+Home-page: https://github.com/seahyc/bank_statement_parser
+Author: Seah Ying Cong
+Author-email: seahyingcong@gmail.com
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: camelot-py==0.11.0
+Requires-Dist: pandas==2.0.3
+Requires-Dist: pycountry==24.6.1
+Requires-Dist: pypdf==4.3.1
+
+This tool takes in bank statements (specifically from OCBC and DBS, but should work for other banks too) and extracts the transactions into a JSON output.

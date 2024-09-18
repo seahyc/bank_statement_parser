@@ -3,11 +3,19 @@ import pandas as pd
 from pandas import DataFrame, Series
 from pycountry import countries
 from typing import List, Dict, Tuple, Set, Optional
-import re, os, string
+import re, string
 from datetime import datetime
 from pypdf import PdfReader
+import warnings
+import json
+import argparse
+from decimal import Decimal, ROUND_HALF_UP
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", message="No tables found in table area", module="camelot.parsers.stream")
 
 # Debug output control
+global DEBUG_OUTPUT
 DEBUG_OUTPUT = False
 
 def extract_tables(file_path: str) -> List[pd.DataFrame]:
@@ -371,11 +379,11 @@ def extract_bank_account_transactions(tables: List[pd.DataFrame], statement_year
             if 'date' in header_lower:
                 header_mapping['Date'] = i
             elif any(word in header_lower for word in ['withdrawal', 'debit']):
-                header_mapping['Withdrawal (SGD)'] = i
+                header_mapping['Withdrawal'] = i
             elif any(word in header_lower for word in ['deposit', 'credit']):
-                header_mapping['Deposit (SGD)'] = i
+                header_mapping['Deposit'] = i
             elif 'balance' in header_lower:
-                header_mapping['Balance (SGD)'] = i
+                header_mapping['Balance'] = i
             elif any(word in header_lower for word in ['description', 'transaction', 'particulars']):
                 header_mapping['Description'] = i
 
@@ -391,7 +399,7 @@ def extract_bank_account_transactions(tables: List[pd.DataFrame], statement_year
                     value = clean_text(str(row.iloc[col_idx]))
                     if key == 'Date':
                         current_transaction[key] = standardize_date(value, statement_year)
-                    elif key in ['Withdrawal (SGD)', 'Deposit (SGD)', 'Balance (SGD)']:
+                    elif key in ['Withdrawal', 'Deposit', 'Balance']:
                         current_transaction[key] = parse_amount(value)
                     else:
                         current_transaction[key] = value
@@ -420,6 +428,7 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
         print(f"statement_year={statement_year}")
     
     transactions = []
+    excluded_pattern = re.compile(r'AUTO-PYT FROM ACCT#\d+ REF NO: \d+|PAYMENT BY GIRO')
 
     for table in tables:
         current_transaction = {}
@@ -438,7 +447,7 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
                         current_transaction['Date'] = standardize_date(value_str, statement_year)
                         date_found = True
                     elif not amount_found and CURRENCY_PATTERN.search(value_str):
-                        current_transaction['Amount (SGD)'] = parse_amount(value_str)
+                        current_transaction['Amount'] = parse_amount(value_str)
                         amount_found = True
                     elif not is_location(value_str) and value_str != '':
                         description_parts.append(value_str)
@@ -451,6 +460,10 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
                 additional_text = get_additional_description(table.iloc[idx_pos+1:idx_pos+11], NON_TRANSACTION_MARKERS)
                 if additional_text:
                     current_transaction['Description'] += ' ' + additional_text
+                
+                # Exclude transactions matching the pattern
+                if excluded_pattern.search(current_transaction['Description']):
+                    current_transaction = {}
             else:
                 continue  # Skip non-transaction rows
 
@@ -509,54 +522,111 @@ def extract_pdf_text(file_path: str) -> str:
         pdf_reader = PdfReader(file)
         return pdf_reader.pages[0].extract_text()
 
-def main():
-    file_paths = [
-        '360 ACCOUNT-2001-07-24.pdf',
-        'dbs_acct_08_2024.pdf',
-        'dbs_cc_05_2024.pdf',
-        'OCBC 90.N CARD-9905-05-24.pdf'
-    ]
+def main(file_path: str):
+    if DEBUG_OUTPUT:
+        print("\033[95m" + "=" * 80)  # Bright purple
+        print(f"Processing file: {file_path}")
+        print("=" * 80 + "\033[0m")  # Reset color
     
-    for file_path in file_paths:
-        if DEBUG_OUTPUT:
-            print("\033[95m" + "=" * 80)  # Bright purple
-            print(f"Processing file: {file_path}")
-            print("=" * 80 + "\033[0m")  # Reset color
-        file_path_full = os.path.join('/Users/yingcong/Documents/Bank Statements', file_path)
+    tables = extract_tables(file_path)
+    
+    transaction_tables: List[pd.DataFrame] = []
+    statement_date = None
+    statement_year = None
+    for table in tables:
+        processed_table, is_transaction = clean_and_detect_transaction_table(table)
+        if is_transaction:
+            transaction_tables.append(processed_table)
+        if not statement_date:
+            pdf_text = extract_pdf_text(file_path)
+            statement_date, statement_year = extract_statement_date(processed_table, pdf_text)
+    
+    if not statement_year:
+        # If no year found in tables, try to extract from filename
+        year_match = re.search(r'(20[1-4][0-9]|2050)', file_path)
+        if year_match:
+            statement_year = year_match.group(1)
+    
+    if DEBUG_OUTPUT:
+        print(f"Statement Date: {statement_date}")
+        print(f"Statement Year: {statement_year}")
+    
+    if any(is_bank_account_table(table) for table in transaction_tables):
+        transactions = extract_bank_account_transactions(transaction_tables, statement_year)
+    else:
+        transactions = extract_credit_card_transactions(transaction_tables, statement_year)
+    
+    if not transactions:
+        print("No transactions found")
+        return []
+    
+    return transactions
+
+def verify_transactions(transactions: List[Dict]) -> Dict:
+    total_deposits = sum(Decimal(str(t.get('Deposit', 0) or 0)) for t in transactions)
+    total_withdrawals = sum(Decimal(str(t.get('Withdrawal', 0) or 0)) for t in transactions)
+    total_credit = sum(Decimal(str(t['Amount'])) for t in transactions if t.get('Amount', 0) < 0)
+    total_debit = sum(abs(Decimal(str(t['Amount']))) for t in transactions if t.get('Amount', 0) > 0)
+    
+    # Use the same logic as is_bank_account_table
+    is_bank_account = any('Balance' in t for t in transactions)
+    
+    if not is_bank_account:
+        net_spend = total_debit + total_credit
+        return {
+            "total_credit": round(total_credit, 2),
+            "total_debit": round(total_debit, 2),
+            "net_spend": round(net_spend, 2)
+        }
+    else:
+        first_balance = next((Decimal(str(t['Balance'])) for t in transactions if 'Balance' in t), None)
+        last_balance = next((Decimal(str(t['Balance'])) for t in reversed(transactions) if 'Balance' in t), None)
         
-        tables = extract_tables(file_path_full)
-        
-        transaction_tables: List[pd.DataFrame] = []
-        statement_date = None
-        statement_year = None
-        for table in tables:
-            processed_table, is_transaction = clean_and_detect_transaction_table(table)
-            if is_transaction:
-                transaction_tables.append(processed_table)
-            if not statement_date:
-                pdf_text = extract_pdf_text(file_path_full)
-                statement_date, statement_year = extract_statement_date(processed_table, pdf_text)
-        
-        if not statement_year:
-            # If no year found in tables, try to extract from filename
-            year_match = re.search(r'(20[1-4][0-9]|2050)', file_path)
-            if year_match:
-                statement_year = year_match.group(1)
-        
-        if DEBUG_OUTPUT:
-            print(f"Statement Date: {statement_date}")
-            print(f"Statement Year: {statement_year}")
-        
-        if any(is_bank_account_table(table) for table in transaction_tables):
-            transactions = extract_bank_account_transactions(transaction_tables, statement_year)
+        if first_balance is not None and last_balance is not None:
+            # Adjust the first balance by reversing the first transaction
+            first_transaction = transactions[0]
+            first_deposit = Decimal(str(first_transaction.get('Deposit', 0) or 0))
+            first_withdrawal = Decimal(str(first_transaction.get('Withdrawal', 0) or 0))
+            adjusted_first_balance = first_balance - first_deposit + first_withdrawal
+            
+            calculated_last_balance = adjusted_first_balance + total_deposits - total_withdrawals
+            balance_matches = abs(calculated_last_balance - last_balance) < Decimal('0.01')
         else:
-            transactions = extract_credit_card_transactions(transaction_tables, statement_year)
+            adjusted_first_balance = None
+            calculated_last_balance = None
+            balance_matches = None
         
-        if not transactions:
-            print("No transactions found")
-            continue
-        for transaction in transactions:            
-            print(transaction)
+        return {
+            "total_deposits": round(total_deposits, 2),
+            "total_withdrawals": round(total_withdrawals, 2),
+            "starting_balance": round(adjusted_first_balance, 2) if adjusted_first_balance is not None else None,
+            "ending_balance_from_file": round(last_balance, 2) if last_balance is not None else None,
+            "ending_balance_from_calculations": round(calculated_last_balance, 2) if calculated_last_balance is not None else None,
+            "balance_matches": balance_matches
+        }
+
+def decimal_default(obj):
+    if isinstance(obj, Decimal):
+        return float(obj)
+    raise TypeError
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Process bank statement PDF")
+    parser.add_argument("pdf_path", help="Path to the PDF file")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output")
+    parser.add_argument("--verify", action="store_true", help="Verify transaction totals")
+    args = parser.parse_args()
+
+    DEBUG_OUTPUT = args.debug
+
+    pdf_path = args.pdf_path
+    transactions = main(pdf_path)
+    result = {
+        "transactions": transactions,
+        "verification_data": {} 
+        }
+
+    if args.verify:
+        result["verification_data"] = verify_transactions(transactions)
+
+    print(json.dumps(result, indent=2, default=decimal_default))
