@@ -40,7 +40,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "ocbc_dbs_statement_parser=src.cli:cli",
+            "ocbc_dbs_statement_parser=ocbc_dbs_statement_parser.cli:cli",
         ],
     },
 )
