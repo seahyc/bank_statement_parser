@@ -7,9 +7,7 @@ import re, string
 from datetime import datetime
 from pypdf import PdfReader
 import warnings
-import json
-import argparse
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", message="No tables found in table area", module="camelot.parsers.stream")
