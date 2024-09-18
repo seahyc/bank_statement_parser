@@ -1,6 +1,6 @@
 import pytest
 import pandas as pd
-from src.main import (
+from ocbc_dbs_statement_parser.main import (
     clean_text,
     is_transaction_row,
     standardize_date,
