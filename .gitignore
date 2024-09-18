@@ -1,3 +1,6 @@
 venv_py38
 pdftopng
 .vscode
+build/
+dist/
+*.egg-info/

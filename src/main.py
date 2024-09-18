@@ -605,28 +605,19 @@ def verify_transactions(transactions: List[Dict]) -> Dict:
             "balance_matches": balance_matches
         }
 
-def decimal_default(obj):
-    if isinstance(obj, Decimal):
-        return float(obj)
-    raise TypeError
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Process bank statement PDF")
-    parser.add_argument("pdf_path", help="Path to the PDF file")
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
-    parser.add_argument("--verify", action="store_true", help="Verify transaction totals")
-    args = parser.parse_args()
-
-    DEBUG_OUTPUT = args.debug
-
-    pdf_path = args.pdf_path
-    transactions = main(pdf_path)
+def parse_bank_statement(file_path: str, debug: bool = False, verify: bool = False) -> Dict:
+    global DEBUG_OUTPUT
+    DEBUG_OUTPUT = debug
+    
+    transactions = main(file_path)
     result = {
         "transactions": transactions,
-        "verification_data": {} 
-        }
+        "verification_data": {}
+    }
 
-    if args.verify:
+    if verify:
         result["verification_data"] = verify_transactions(transactions)
 
-    print(json.dumps(result, indent=2, default=decimal_default))
+    return result
+
+__all__ = ['parse_bank_statement', 'verify_transactions']

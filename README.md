@@ -1,22 +1,28 @@
-# Bank Statement Parser
+# OCBC DBS Statement Parser
 
 A Python tool to parse bank statements from PDF files, specifically designed for OCBC and DBS statements but potentially compatible with other banks.
 
+## Requirements
+
+- Python 3.7 or 3.8
+
 # Installation
 
-pip install bank-statement-parser
+```
+pip install ocbc-dbs-statement-parser
+```
 
 # Usage
 
 ```
-python main.py <pdf_path> [--debug] [--verify]
+python -m src.cli <pdf_path> [--debug] [--verify]
 ```
 
 
 For more information, run:
 
 ```
-python main.py --help
+python -m src.cli --help
 ```
 
 ## Features

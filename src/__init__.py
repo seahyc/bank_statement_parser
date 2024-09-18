@@ -1,3 +1,5 @@
-from .main import main, verify_transactions
+__version__ = "0.1.0"
 
-__all__ = ['main', 'verify_transactions']
+from .main import parse_bank_statement, verify_transactions
+
+__all__ = ['parse_bank_statement', 'verify_transactions']

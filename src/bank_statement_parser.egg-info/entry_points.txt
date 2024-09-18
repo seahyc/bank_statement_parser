@@ -1,2 +1,2 @@
 [console_scripts]
-bank_statement_parser = bank_statement_parser.main:cli
+bank_statement_parser = bank_statement_parser.cli:cli

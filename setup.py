@@ -1,14 +1,21 @@
 from setuptools import setup, find_packages
+import os
+
+def get_version():
+    version = os.environ.get('GITHUB_REF_NAME')
+    if version and version.startswith('v'):
+        return version[1:]  # Remove 'v' prefix
+    return '0.0.0'  # Default version if not a release
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setup(
-    name="bank_statement_parser",
-    version="0.1.0",
+    name="ocbc_dbs_statement_parser",
+    version=get_version(),
     author="Seah Ying Cong",
     author_email="seahyingcong@gmail.com",
-    description="A tool to parse bank statements from PDF files",
+    description="A tool to parse OCBC and DBS bank and credit card statements from PDF files",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/seahyc/bank_statement_parser",
@@ -24,7 +31,7 @@ setup(
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
     ],
-    python_requires=">=3.7",
+    python_requires='>=3.7, <3.9',  # Specify Python version constraint
     install_requires=[
         "camelot-py==0.11.0",
         "pandas==2.0.3",
@@ -33,7 +40,7 @@ setup(
     ],
     entry_points={
         "console_scripts": [
-            "bank_statement_parser=bank_statement_parser.main:cli",
+            "ocbc_dbs_statement_parser=src.cli:cli",
         ],
     },
 )
