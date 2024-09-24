@@ -12,17 +12,21 @@ A Python tool to parse bank statements from PDF files, specifically designed for
 pip install ocbc-dbs-statement-parser
 ```
 
+or if you're running it from source:
+
+```
+pip install -e .
+```
+
 # Usage
 
 ```
-python -m src.cli <pdf_path> [--debug] [--verify]
+python -m ocbc-dbs-statement-parser <pdf_path> [--debug] [--verify] [--help]
 ```
 
-
-For more information, run:
-
+Locally
 ```
-python -m src.cli --help
+python -m ocbc-dbs-statement-parser.cli <pdf_path> [--debug] [--verify][--help]
 ```
 
 ## Features
@@ -49,6 +53,13 @@ To run tests using pytest, execute the following command:
 
 ```
 pytest tests/test_main.py
+```
+
+### Push releases
+
+```
+bumpversion patch|minor|major
+git push && git push --tags
 ```
 
 ## Dependencies

@@ -236,7 +236,7 @@ def is_bank_account_table(table: pd.DataFrame) -> bool:
         print(f"DEBUG_OUTPUT: is_bank_account_table output: {all(any(keyword in cell for cell in header_row.values.flatten()) for keyword in header_keywords)}")
     return all(any(keyword in cell for cell in header_row.values.flatten()) for keyword in header_keywords)
 
-def parse_amount(amount_str):
+def parse_amount(amount_str: str) -> float:
     amount_str = amount_str.replace(',', '').replace(' ', '')
     is_negative = False
 
@@ -252,12 +252,11 @@ def parse_amount(amount_str):
         amount_str = amount_str[:-2]
     elif amount_str.endswith('DR'):
         amount_str = amount_str[:-2]
-
     try:
         amount = float(amount_str)
         return -amount if is_negative else amount
     except ValueError:
-        return None
+        return 0
 
 def is_location(value_str):
     # Dynamic location detection using pycountry
@@ -397,7 +396,9 @@ def extract_bank_account_transactions(tables: List[pd.DataFrame], statement_year
                     value = clean_text(str(row.iloc[col_idx]))
                     if key == 'Date':
                         current_transaction[key] = standardize_date(value, statement_year)
-                    elif key in ['Withdrawal', 'Deposit', 'Balance']:
+                    elif key == 'Withdrawal':
+                        current_transaction[key] = -parse_amount(value)
+                    elif key in ['Deposit', 'Balance']:
                         current_transaction[key] = parse_amount(value)
                     else:
                         current_transaction[key] = value
@@ -405,7 +406,7 @@ def extract_bank_account_transactions(tables: List[pd.DataFrame], statement_year
                 # Get the integer position of idx
                 idx_pos = table.index.get_loc(idx)
                 # Check next row for additional description
-                additional_text = get_additional_description(table.iloc[idx_pos+1:idx_pos+11], NON_TRANSACTION_MARKERS)
+                additional_text = get_additional_description(table.iloc[idx_pos+1:idx_pos+11].copy(), NON_TRANSACTION_MARKERS)
                 if additional_text:
                     current_transaction['Description'] += ' ' + additional_text
 
@@ -445,7 +446,7 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
                         current_transaction['Date'] = standardize_date(value_str, statement_year)
                         date_found = True
                     elif not amount_found and CURRENCY_PATTERN.search(value_str):
-                        current_transaction['Amount'] = parse_amount(value_str)
+                        current_transaction['Amount'] = -parse_amount(value_str)
                         amount_found = True
                     elif not is_location(value_str) and value_str != '':
                         description_parts.append(value_str)
@@ -455,7 +456,7 @@ def extract_credit_card_transactions(tables: List[pd.DataFrame], statement_year=
                 # Get the integer position of idx
                 idx_pos = table.index.get_loc(idx)
                 # Use the new function to get additional description
-                additional_text = get_additional_description(table.iloc[idx_pos+1:idx_pos+11], NON_TRANSACTION_MARKERS)
+                additional_text = get_additional_description(table.iloc[idx_pos+1:idx_pos+11].copy(), NON_TRANSACTION_MARKERS)
                 if additional_text:
                     current_transaction['Description'] += ' ' + additional_text
                 
@@ -563,8 +564,8 @@ def main(file_path: str):
 def verify_transactions(transactions: List[Dict]) -> Dict:
     total_deposits = sum(Decimal(str(t.get('Deposit', 0) or 0)) for t in transactions)
     total_withdrawals = sum(Decimal(str(t.get('Withdrawal', 0) or 0)) for t in transactions)
-    total_credit = sum(Decimal(str(t['Amount'])) for t in transactions if t.get('Amount', 0) < 0)
-    total_debit = sum(abs(Decimal(str(t['Amount']))) for t in transactions if t.get('Amount', 0) > 0)
+    total_credit = sum(Decimal(str(t['Amount'])) for t in transactions if t.get('Amount', 0) > 0)
+    total_debit = sum(Decimal(str(t['Amount'])) for t in transactions if t.get('Amount', 0) < 0)
     
     # Use the same logic as is_bank_account_table
     is_bank_account = any('Balance' in t for t in transactions)
@@ -585,9 +586,9 @@ def verify_transactions(transactions: List[Dict]) -> Dict:
             first_transaction = transactions[0]
             first_deposit = Decimal(str(first_transaction.get('Deposit', 0) or 0))
             first_withdrawal = Decimal(str(first_transaction.get('Withdrawal', 0) or 0))
-            adjusted_first_balance = first_balance - first_deposit + first_withdrawal
+            adjusted_first_balance = first_balance - first_deposit - first_withdrawal
             
-            calculated_last_balance = adjusted_first_balance + total_deposits - total_withdrawals
+            calculated_last_balance = adjusted_first_balance + total_deposits + total_withdrawals
             balance_matches = abs(calculated_last_balance - last_balance) < Decimal('0.01')
         else:
             adjusted_first_balance = None
